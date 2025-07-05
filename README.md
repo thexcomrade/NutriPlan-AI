@@ -21,8 +21,7 @@ NutriPlan AI is an intelligent, cross-platform nutrition assistant powered by Ge
 ---
 
 ## 🗂️ Folder Structure
-
-
+```plaintext
 nutriplan-ai/
 ├── mobile-app/ # Flutter UI & client app
 ├── backend-api/ # FastAPI backend with REST APIs
@@ -37,4 +36,27 @@ nutriplan-ai/
 ├── README.md
 ├── .env
 ├── LICENSE
-'''
+```
+## 🛠️ Tech Stack
+```plaintext
+| Layer         | Technology                     |
+|---------------|--------------------------------|
+| Frontend      | Flutter (Dart)                 |
+| Backend API   | FastAPI (Python)               |
+| Database      | Firebase Firestore / PostgreSQL|
+| ML/AI         | Python (Sklearn, Pandas, Rasa) |
+| Voice AI      | STT/TTS (Vosk, pyttsx3, etc.)  |
+| Authentication| Firebase Auth + JWT            |
+| Hosting       | Firebase / Render / GCP        |
+```
+---
+
+## ⚙️ Setup Instructions
+
+### 🧱 Prerequisites
+
+- Flutter SDK
+- Python 3.9+
+- Firebase Project
+- GitHub account
+
