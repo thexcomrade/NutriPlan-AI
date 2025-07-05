@@ -1,6 +1,5 @@
 # 🧠 NutriPlan AI
-[![Typing SVG](https://readme-typing-svg.demolab.com/?lines=NutriPlan AI,+Hyper+Personalized+AI+Powered +Nutrition+Assistant+%7C+Budget+Smart;Frog-Inspired+Design&font=Fira+Code&width=1000)](https://git.io/typing-svg)
-
+![Typing SVG](https://readme-typing-svg.demolab.com/?lines=NutriPlan+AI%2C+Hyper+Personalized+AI-Powered+Nutrition+Assistant+%7C+Budget+Smart;Frog-Inspired+Design&font=Fira+Code&width=1000)
 
 NutriPlan AI is an intelligent, cross-platform nutrition assistant powered by Generative AI, Machine Learning, and real-time health integrations. Built using **Flutter** and **FastAPI**, it delivers **hyper-personalized meal plans**, tracks health metrics, supports **multilingual UI**, and provides **24/7 AI dietician support** — making it a true **virtual diet coach** for gym-goers, hostelers, elderly individuals, and anyone with dietary goals.
 
