@@ -1,0 +1,77 @@
+medication_conflict_check:
+  patterns:
+    - "Can I take grapefruit with my medicine?"
+    - "Does warfarin interact with spinach?"
+    - "Is it okay to eat leafy greens with blood thinners?"
+    - "What food should I avoid with lithium?"
+    - "Do any of these meals interact with my prescription?"
+    - "Will this supplement interfere with my medication?"
+    - "What not to eat with antibiotics?"
+    - "Can ibuprofen and turmeric be taken together?"
+  responses:
+    - "Let me check your medication for any known food or supplement interactions."
+    - "It’s always wise to cross-check. I’ll review known risks and adjust your meals accordingly."
+    - "I’ll flag foods that may interact with your current medications. Safety first!"
+    - "Give me a moment to analyze known dietary conflicts with your medicine."
+
+medication_intake_questions:
+  patterns:
+    - "I’m taking blood pressure tablets"
+    - "I use insulin"
+    - "I just started antidepressants"
+    - "I'm on antibiotics"
+    - "I use asthma inhalers"
+    - "I’m taking metformin"
+    - "I’m using statins"
+  questions:
+    - "What time of day do you usually take this medication?"
+    - "Do you take it with food or on an empty stomach?"
+    - "Have you been advised to avoid certain foods while using it?"
+  responses:
+    - "Got it. I’ll tailor your meals to work well with {medication_name}."
+    - "Thanks. Your plan will consider timing and absorption of your medication."
+
+prescription_upload_prompt:
+  patterns:
+    - "Here's my prescription"
+    - "I'm uploading my medicine list"
+    - "This has my medication info"
+    - "Can you scan my prescription?"
+  responses:
+    - "Thanks. I’ll extract medication data and check for food-drug interactions."
+    - "Got it. I’ll read your prescription and tailor your dietary plan accordingly."
+    - "Let me process the document and ensure safety with your current meds."
+
+side_effect_detection:
+  patterns:
+    - "I feel dizzy after meals"
+    - "I’m nauseous after taking my meds"
+    - "This pill gives me headaches"
+    - "I feel bloated after food and medicine"
+  questions:
+    - "Have you eaten a specific food before these symptoms appeared?"
+    - "Would you like me to review common interactions for your medicine?"
+  responses:
+    - "That could be a food-medicine interaction. I’ll review and adjust your plan."
+    - "Thanks for reporting. I’ll cross-check meals for potential conflicts."
+
+supplement_warning:
+  patterns:
+    - "Can I take fish oil with my pills?"
+    - "Should I stop turmeric while on meds?"
+    - "Do vitamins affect my prescription?"
+    - "I take zinc daily, is that okay?"
+  responses:
+    - "Some supplements can interfere with medications. Let me check compatibility."
+    - "I'll review if any of your supplements may interact with your treatment plan."
+
+medication_reminder_trigger:
+  patterns:
+    - "Remind me to take my medicine"
+    - "Set a pill reminder for 8pm"
+    - "I forget my medication"
+    - "Can you notify me before meals to take pills?"
+  responses:
+    - "Sure, I’ll schedule a reminder. What time would you like me to notify you?"
+    - "Consider using the medication timing feature to set up recurring alerts."
+    - "I’ve set a reminder. You’ll get a notification before your next dose."

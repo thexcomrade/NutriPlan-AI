@@ -1,0 +1,87 @@
+health_condition_check:
+  patterns:
+    - "I have diabetes"
+    - "I'm hypertensive"
+    - "I'm recovering from surgery"
+    - "I have PCOS"
+    - "I suffer from high cholesterol"
+    - "I have kidney issues"
+    - "I have celiac disease"
+    - "My child has anemia"
+    - "I need renal-friendly food"
+    - "Heart issues run in my family"
+  responses:
+    - "Thanks for sharing. I’ll ensure your meals align with this medical condition."
+    - "Got it. I’ll apply dietary filters suitable for {detected_condition}."
+    - "Understood. Your meal plan will focus on nutritional support for that condition."
+
+health_goal_discussion:
+  patterns:
+    - "I want to lose weight"
+    - "I need to gain muscle"
+    - "I'm training for a marathon"
+    - "I want to eat healthier"
+    - "Help me reduce belly fat"
+    - "I want a high-protein diet"
+    - "I need a low-carb plan"
+    - "Can you help me improve my stamina?"
+  responses:
+    - "Absolutely! I’ll optimize your meals to support your goal: {goal}."
+    - "Awesome! I’ll recommend foods to help you {goal}, safely and sustainably."
+    - "Got it. Let’s get your meal plan in sync with your fitness target."
+
+  questions:
+    - "What’s your current weight and height? I can calculate your BMI."
+    - "Do you prefer vegetarian or non-vegetarian meals?"
+    - "Would you like your plan to be gym-aligned or general lifestyle-focused?"
+
+symptom_based_query:
+  patterns:
+    - "I feel tired all the time"
+    - "I’m always bloated"
+    - "I get headaches after eating"
+    - "I feel weak post meals"
+    - "I get dizzy often"
+    - "I’m low on energy"
+  questions:
+    - "How long have you been experiencing these symptoms?"
+    - "Have you consulted a doctor or done any tests recently?"
+    - "Would you like me to suggest a meal adjustment based on this?"
+  responses:
+    - "Sounds like your diet may need adjustment. I’ll suggest a meal plan that boosts energy and reduces discomfort."
+    - "Thanks for sharing. I’ll flag this and align your meals to ease those symptoms."
+
+chronic_disease_monitoring:
+  patterns:
+    - "Track my diabetes progress"
+    - "How’s my blood pressure trend?"
+    - "Is my cholesterol improving?"
+    - "Am I eating right for my condition?"
+  responses:
+    - "I’ll compare your tracked stats and meal logs to give you a health summary."
+    - "Let’s review your intake trends and suggest improvements."
+    - "Sure, I’ll assess your meals against your latest health data."
+
+stress_and_mental_health:
+  patterns:
+    - "I’m feeling stressed"
+    - "Food isn’t helping my mood"
+    - "Can diet help my anxiety?"
+    - "I need calming foods"
+    - "My sleep is bad lately"
+  responses:
+    - "Some foods can support mental well-being. I’ll suggest calming, sleep-friendly meals."
+    - "Let’s try adding omega-3s, magnesium-rich options, and serotonin-boosting meals."
+    - "You’re not alone—balanced nutrition can definitely support mood and energy."
+
+fallback_health:
+  patterns:
+    - "I just want to be healthy"
+    - "What should I eat daily?"
+    - "Suggest something healthy"
+    - "I want balanced meals"
+  responses:
+    - "Let’s build a general wellness plan with balanced macros and clean ingredients."
+    - "I'll recommend meals that support immune strength, gut health, and steady energy."
+    - "Perfect. I’ll design a flexible plan based on your lifestyle."
+

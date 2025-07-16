@@ -1,0 +1,83 @@
+allergy_check:
+  patterns:
+    - "I have food allergies"
+    - "I'm allergic to peanuts"
+    - "Avoid dairy products"
+    - "Exclude gluten"
+    - "Shellfish causes rashes"
+    - "Do these meals contain eggs?"
+    - "My kid is allergic to soy"
+    - "I get itchy after eating nuts"
+    - "No lactose please"
+    - "I can’t digest wheat"
+  responses:
+    - "Thanks for letting me know. I’ll exclude those allergens from your plan."
+    - "Noted! I’ve updated your profile to avoid {detected_allergy}."
+    - "Got it. Your preferences will reflect that restriction going forward."
+    - "I'll make sure no meals contain any of the allergens you've mentioned."
+
+allergy_assessment:
+  patterns:
+    - "Do you need my allergy info?"
+    - "Should I enter my allergies?"
+    - "How do I tell you what I can't eat?"
+    - "Do you need medical history?"
+    - "Can I upload my prescription?"
+  questions:
+    - "Could you list any known allergies or intolerances you have to foods or medications?"
+    - "Are you allergic to any common items like nuts, shellfish, dairy, gluten, or soy?"
+    - "Do you experience symptoms like rashes, headaches, or digestion issues after eating certain foods?"
+    - "Would you like to upload a prescription for automatic allergy detection?"
+
+  responses:
+    - "Yes, sharing your allergy information helps me personalize your meal plan safely."
+    - "If you have a prescription, you can upload it now or describe your allergies directly."
+    - "I can help detect potential risks from your symptoms or medical notes. Just say the word!"
+
+prescription_analysis:
+  patterns:
+    - "Here's my prescription"
+    - "Uploading my report"
+    - "I’ve added my medical file"
+    - "Can you read my prescription?"
+    - "This contains my allergy info"
+  responses:
+    - "Got it. I'm scanning your prescription for any allergy or dietary restrictions."
+    - "Thanks for uploading! I'll check for allergens and medications that impact your diet."
+    - "I’ll extract the necessary info and adjust your nutrition profile accordingly."
+
+symptom_reporting:
+  patterns:
+    - "I get headaches after dairy"
+    - "My throat itches when I eat peanuts"
+    - "Eating eggs makes me nauseous"
+    - "Spicy food gives me stomach cramps"
+    - "I have hives after seafood"
+  questions:
+    - "Would you like me to treat this as a potential allergy?"
+    - "Should I exclude {suspected_trigger} from your future meals?"
+  responses:
+    - "That might be an allergy. I’ll mark {suspected_trigger} as restricted unless you confirm otherwise."
+    - "Thanks for sharing. It's best to avoid {suspected_trigger} until we confirm safety."
+
+medication_conflict:
+  patterns:
+    - "I’m on blood thinners"
+    - "My meds don't go well with grapefruit"
+    - "Can I eat leafy greens with warfarin?"
+    - "Do these meals interact with my medication?"
+    - "Is there any diet restriction while on lithium?"
+  responses:
+    - "I'll cross-check your medications with dietary restrictions."
+    - "Let me check food interactions for your meds. Safety first!"
+    - "It's smart to ask—I'll make sure your meals avoid known drug-food conflicts."
+
+fallback_allergy:
+  patterns:
+    - "I’m not sure what causes my reaction"
+    - "I don’t know what I’m allergic to"
+    - "Something I eat gives me trouble"
+  responses:
+    - "Let’s monitor your symptoms and gradually identify possible triggers."
+    - "Would you like me to log your symptoms to help detect patterns over time?"
+    - "Try describing your symptoms, and I’ll suggest common allergens to watch for."
