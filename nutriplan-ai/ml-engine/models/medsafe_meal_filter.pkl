@@ -1,0 +1,463 @@
+import os
+import json
+import pickle
+import pandas as pd
+import numpy as np
+from pathlib import Path
+import re
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
+from sklearn.preprocessing import LabelEncoder, OneHotEncoder, StandardScaler
+from sklearn.compose import ColumnTransformer
+from sklearn.pipeline import Pipeline
+from sklearn.model_selection import train_test_split, GridSearchCV, StratifiedKFold
+from sklearn.metrics import (classification_report, accuracy_score, f1_score, 
+                            precision_score, recall_score, roc_auc_score, 
+                            confusion_matrix, ConfusionMatrixDisplay)
+from rich import print
+from rich.panel import Panel
+from rich.progress import track
+import warnings
+warnings.filterwarnings("ignore")
+import spacy
+from gensim.models import Word2Vec
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Dense, Dropout
+from tensorflow.keras.optimizers import Adam
+from tensorflow.keras.wrappers.scikit_learn import KerasClassifier
+
+# ============ PATH CONFIG =============
+BASE_DIR = Path(__file__).resolve().parent.parent
+DATA_PATH = BASE_DIR / "data" / "processed" / "meal_safety.csv"
+MODEL_PATH = BASE_DIR / "models" / "medsafe_meal_filter.pkl"
+META_PATH = BASE_DIR / "models" / "medsafe_meal_filter_metadata.json"
+WORD2VEC_PATH = BASE_DIR / "models" / "medsafe_word2vec.model"
+
+# ============ ADVANCED MEDICAL KNOWLEDGE BASE ============
+MEDICAL_ONTOLOGY = {
+    "conditions": {
+        "diabetes": {
+            "avoid": ["sugar", "white rice", "jaggery", "sweet", "honey", "maple syrup", "refined carbs"],
+            "monitor": ["carbohydrates", "glycemic index"],
+            "recommend": ["fiber-rich foods", "low-glycemic foods"]
+        },
+        "hypertension": {
+            "avoid": ["salt", "pickles", "papad", "fried foods", "processed meats", "canned soups", "soy sauce"],
+            "monitor": ["sodium", "potassium balance"],
+            "recommend": ["potassium-rich foods", "magnesium sources"]
+        },
+        "cholesterol": {
+            "avoid": ["butter", "cheese", "red meat", "trans fats", "palm oil", "coconut oil", "organ meats"],
+            "monitor": ["saturated fats", "dietary cholesterol"],
+            "recommend": ["omega-3 fatty acids", "soluble fiber"]
+        },
+        "celiac": {
+            "avoid": ["gluten", "wheat", "barley", "rye", "malt", "brewer's yeast"],
+            "monitor": ["hidden gluten sources"],
+            "recommend": ["gluten-free grains"]
+        },
+        "lactose_intolerant": {
+            "avoid": ["milk", "curd", "paneer", "whey", "casein", "buttermilk", "cream"],
+            "monitor": ["lactose derivatives"],
+            "recommend": ["lactose-free alternatives", "calcium-rich plants"]
+        },
+        "nut_allergy": {
+            "avoid": ["cashew", "almond", "peanut", "nut", "walnut", "pistachio", "pecan"],
+            "monitor": ["cross-contamination"],
+            "recommend": ["seed alternatives"]
+        },
+        "renal_disease": {
+            "avoid": ["high-potassium foods", "high-phosphorus foods", "processed foods"],
+            "monitor": ["protein intake", "electrolytes"],
+            "recommend": ["low-sodium foods", "controlled protein"]
+        },
+        "autoimmune": {
+            "avoid": ["nightshades", "gluten", "dairy", "processed foods"],
+            "monitor": ["inflammation markers"],
+            "recommend": ["anti-inflammatory foods"]
+        }
+    },
+    "medications": {
+        "warfarin": {
+            "avoid": ["vitamin K-rich foods", "green leafy vegetables", "soy products", "cranberry"],
+            "mechanism": "Vitamin K antagonism",
+            "severity": "high"
+        },
+        "metformin": {
+            "avoid": ["excessive alcohol", "high-sugar foods"],
+            "mechanism": "Lactic acidosis risk",
+            "severity": "moderate"
+        },
+        "statins": {
+            "avoid": ["grapefruit", "pomelo", "alcohol"],
+            "mechanism": "CYP3A4 enzyme inhibition",
+            "severity": "high"
+        },
+        "ace_inhibitors": {
+            "avoid": ["potassium supplements", "salt substitutes"],
+            "mechanism": "Hyperkalemia risk",
+            "severity": "high"
+        },
+        "lithium": {
+            "avoid": ["salt restriction", "diuretics"],
+            "mechanism": "Lithium toxicity",
+            "severity": "high"
+        },
+        "maois": {
+            "avoid": ["aged cheeses", "cured meats", "tap beer", "soy sauce"],
+            "mechanism": "Tyramine interaction",
+            "severity": "critical"
+        },
+        "thyroid_meds": {
+            "avoid": ["soy", "calcium supplements", "iron supplements", "fiber"],
+            "mechanism": "Absorption interference",
+            "severity": "moderate"
+        },
+        "antibiotics": {
+            "avoid": ["dairy", "calcium", "magnesium", "alcohol"],
+            "mechanism": "Absorption interference",
+            "severity": "moderate"
+        }
+    },
+    "nutrient_interactions": {
+        "calcium": ["antibiotics", "thyroid_meds", "bisphosphonates"],
+        "vitamin_k": ["warfarin"],
+        "tyramine": ["maois"],
+        "potassium": ["ace_inhibitors", "spironolactone"],
+        "fiber": ["metformin", "digoxin", "levothyroxine"]
+    }
+}
+
+# ============ ADVANCED FEATURE ENGINEERING ============
+class MedicalSafetyFeatureExtractor:
+    def __init__(self):
+        self.nlp = spacy.load("en_core_web_sm")
+        self.word2vec_model = None
+        
+    def load_word2vec(self, path):
+        if os.path.exists(path):
+            self.word2vec_model = Word2Vec.load(str(path))
+        else:
+            print("[yellow]⚠️ Word2Vec model not found. Some features will be disabled.[/]")
+            
+    def extract_medical_features(self, row):
+        features = {}
+        
+        # Medical condition risk
+        features["condition_risk"] = 0
+        meal = row["meal_name"].lower()
+        conditions = str(row["medical_conditions"]).lower().split(",")
+        
+        for cond in conditions:
+            cond = cond.strip()
+            if cond in MEDICAL_ONTOLOGY["conditions"]:
+                avoid_list = MEDICAL_ONTOLOGY["conditions"][cond]["avoid"]
+                if any(re.search(rf"\b{re.escape(food)}\b", meal) for food in avoid_list):
+                    features["condition_risk"] += 1
+        
+        # Allergy risk
+        features["allergy_risk"] = 0
+        allergies = str(row["allergies"]).lower().split(",")
+        for allergy in allergies:
+            allergy = allergy.strip()
+            if allergy in MEDICAL_ONTOLOGY["conditions"]:
+                avoid_list = MEDICAL_ONTOLOGY["conditions"][allergy]["avoid"]
+                if any(re.search(rf"\b{re.escape(food)}\b", meal) for food in avoid_list):
+                    features["allergy_risk"] += 1
+        
+        # Medication interaction risk
+        features["medication_risk"] = 0
+        meds = str(row["medications"]).lower().split(",")
+        for med in meds:
+            med = med.strip()
+            if med in MEDICAL_ONTOLOGY["medications"]:
+                avoid_list = MEDICAL_ONTOLOGY["medications"][med]["avoid"]
+                if any(re.search(rf"\b{re.escape(food)}\b", meal) for food in avoid_list):
+                    features["medication_risk"] += 1
+        
+        # Nutrient interaction risk
+        features["nutrient_risk"] = 0
+        if "meal_nutrients" in row:
+            nutrients = json.loads(row["meal_nutrients"])
+            for nutrient, level in nutrients.items():
+                nutrient = nutrient.lower()
+                if nutrient in MEDICAL_ONTOLOGY["nutrient_interactions"]:
+                    for med in meds:
+                        med = med.strip()
+                        if med in MEDICAL_ONTOLOGY["nutrient_interactions"][nutrient]:
+                            # Threshold-based interaction (simplified)
+                            if nutrient == "vitamin_k" and level > 100:  # mcg
+                                features["nutrient_risk"] += 1
+                            elif nutrient == "potassium" and level > 3000:  # mg
+                                features["nutrient_risk"] += 1
+        
+        # Semantic risk analysis using NLP
+        features["semantic_risk"] = 0
+        if self.word2vec_model and "meal_description" in row:
+            doc = self.nlp(row["meal_description"].lower())
+            for token in doc:
+                if token.text in self.word2vec_model.wv:
+                    # Check similarity with risk indicators
+                    risk_sim = self.word2vec_model.wv.similarity(token.text, "risk")
+                    if risk_sim > 0.6:
+                        features["semantic_risk"] += 1
+        
+        # Combined risk score
+        features["total_risk"] = (
+            features["condition_risk"] +
+            features["allergy_risk"] +
+            features["medication_risk"] +
+            features["nutrient_risk"] +
+            features["semantic_risk"]
+        )
+        
+        return features
+
+# ============ ADVANCED MODEL ARCHITECTURE ============
+def create_keras_model(input_dim):
+    model = Sequential([
+        Dense(128, activation='relu', input_dim=input_dim),
+        Dropout(0.3),
+        Dense(64, activation='relu'),
+        Dropout(0.2),
+        Dense(32, activation='relu'),
+        Dense(1, activation='sigmoid')
+    ])
+    model.compile(
+        optimizer=Adam(learning_rate=0.001),
+        loss='binary_crossentropy',
+        metrics=['accuracy']
+    )
+    return model
+
+# ============ DATA LOADING & ENRICHMENT =============
+def load_and_prepare():
+    print("[cyan]⏳ Loading and preparing data...[/]")
+    
+    # Load dataset
+    if not DATA_PATH.exists():
+        raise FileNotFoundError(f"🚨 Data file not found: {DATA_PATH}")
+    
+    df = pd.read_csv(DATA_PATH)
+    
+    # Validate required columns
+    required_cols = ["is_safe", "meal_name", "medical_conditions", "allergies", "medications"]
+    missing_cols = [col for col in required_cols if col not in df.columns]
+    if missing_cols:
+        raise ValueError(f"🚨 Missing required columns: {', '.join(missing_cols)}")
+    
+    # Initialize feature extractor
+    feature_extractor = MedicalSafetyFeatureExtractor()
+    if WORD2VEC_PATH.exists():
+        feature_extractor.load_word2vec(WORD2VEC_PATH)
+    
+    # Extract advanced features
+    features_list = []
+    for idx, row in track(df.iterrows(), description="Extracting features...", total=len(df)):
+        features = feature_extractor.extract_medical_features(row)
+        features_list.append(features)
+    
+    features_df = pd.DataFrame(features_list)
+    df = pd.concat([df, features_df], axis=1)
+    
+    print(f"✅ Enriched dataset with {len(features_df.columns)} medical safety features")
+    return df
+
+# ============ ADVANCED PREPROCESSING ============
+def build_pipeline(X, use_keras=False):
+    # Identify feature types
+    num_cols = X.select_dtypes(include=np.number).columns.tolist()
+    cat_cols = X.select_dtypes(exclude=np.number).columns.tolist()
+    
+    # Preprocessing pipeline
+    transformer = ColumnTransformer([
+        ("num", StandardScaler(), num_cols),
+        ("cat", OneHotEncoder(handle_unknown='ignore', sparse_output=False), cat_cols)
+    ])
+    
+    if use_keras:
+        # Neural network pipeline
+        pipe = Pipeline([
+            ("preprocess", transformer),
+            ("clf", KerasClassifier(
+                build_fn=lambda: create_keras_model(
+                    len(num_cols) + len(X[cat_cols].nunique().sum())
+                ),
+                epochs=50,
+                batch_size=32,
+                verbose=0
+            ))
+        ])
+    else:
+        # Tree-based pipeline
+        pipe = Pipeline([
+            ("preprocess", transformer),
+            ("clf", RandomForestClassifier(
+                n_jobs=-1,
+                class_weight="balanced",
+                random_state=42
+            ))
+        ])
+    
+    return pipe, num_cols, cat_cols
+
+# ============ ENHANCED MODEL TRAINING ============
+def train_advanced_model(X_train, y_train):
+    print("[cyan]🔍 Performing advanced model training...[/]")
+    
+    # Try different models and select best
+    models = {
+        "random_forest": RandomForestClassifier(n_estimators=200, class_weight="balanced"),
+        "gradient_boosting": GradientBoostingClassifier(n_estimators=150),
+        "neural_network": KerasClassifier(
+            build_fn=lambda: create_keras_model(X_train.shape[1]),
+            epochs=50,
+            batch_size=32,
+            verbose=0
+        )
+    }
+    
+    best_model = None
+    best_score = 0
+    cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+    
+    for name, model in models.items():
+        print(f"🧪 Evaluating {name}...")
+        try:
+            scores = cross_val_score(model, X_train, y_train, cv=cv, scoring='roc_auc', n_jobs=-1)
+            mean_score = np.mean(scores)
+            print(f"  {name} AUC: {mean_score:.4f}")
+            
+            if mean_score > best_score:
+                best_score = mean_score
+                best_model = model
+        except Exception as e:
+            print(f"  ⚠️ Error with {name}: {str(e)}")
+    
+    if best_model is None:
+        print("🚨 All models failed. Defaulting to Random Forest")
+        best_model = RandomForestClassifier()
+    
+    print(f"🏆 Selected best model: {type(best_model).__name__}")
+    best_model.fit(X_train, y_train)
+    return best_model
+
+# ============ COMPREHENSIVE EVALUATION ============
+def evaluate_model(model, X_test, y_test, label_encoder):
+    print("[cyan]📊 Evaluating model performance...[/]")
+    
+    y_pred = model.predict(X_test)
+    y_proba = model.predict_proba(X_test)[:, 1] if hasattr(model, "predict_proba") else None
+    
+    # Classification report
+    print("\n" + Panel.fit("[bold]Classification Report[/]", border_style="blue"))
+    print(classification_report(y_test, y_pred, target_names=label_encoder.classes_))
+    
+    # Confusion matrix
+    cm = confusion_matrix(y_test, y_pred)
+    disp = ConfusionMatrixDisplay(confusion_matrix=cm, 
+                                 display_labels=label_encoder.classes_)
+    disp.plot(cmap="Blues")
+    plt.title("Confusion Matrix")
+    plt.savefig(BASE_DIR / "reports" / "confusion_matrix.png")
+    print(f"💾 Saved confusion matrix to reports/confusion_matrix.png")
+    
+    # Metrics
+    metrics = {
+        "accuracy": accuracy_score(y_test, y_pred),
+        "precision": precision_score(y_test, y_pred),
+        "recall": recall_score(y_test, y_pred),
+        "f1": f1_score(y_test, y_pred),
+        "roc_auc": roc_auc_score(y_test, y_proba) if y_proba is not None else None
+    }
+    
+    print("\n" + Panel.fit("[bold]Performance Metrics[/]", border_style="blue"))
+    for metric, value in metrics.items():
+        print(f"{metric.capitalize()}: {value:.4f}")
+    
+    return metrics
+
+# ============ METADATA MANAGEMENT ============
+def save_metadata(label_encoder, num_cols, cat_cols, metrics, feature_importances=None):
+    metadata = {
+        "model_type": "Medical Safety Filter",
+        "training_date": pd.Timestamp.now().isoformat(),
+        "target_labels": list(label_encoder.classes_),
+        "numeric_features": num_cols,
+        "categorical_features": cat_cols,
+        "performance_metrics": metrics,
+        "medical_ontology_version": "1.2",
+        "feature_importances": feature_importances
+    }
+    
+    with open(META_PATH, "w") as f:
+        json.dump(metadata, f, indent=2)
+    print(f"💾 Saved metadata to [blue]{META_PATH}[/]")
+
+# ============ MAIN TRAINING WORKFLOW ============
+def train():
+    print(Panel.fit("🛡️ [bold cyan]NutriPlan - Advanced Medical Meal Safety Filter[/] 🍱", 
+                   subtitle="v2.0 | Clinical-Grade Protection", border_style="cyan"))
+    
+    # Load and prepare data
+    try:
+        df = load_and_prepare()
+    except Exception as e:
+        print(f"[red]🚨 Error: {str(e)}[/]")
+        return
+    
+    # Prepare features and target
+    feature_cols = [
+        "condition_risk", "allergy_risk", "medication_risk", 
+        "nutrient_risk", "semantic_risk", "total_risk"
+    ]
+    
+    # Add any additional columns that might be present
+    for col in ["age", "gender", "bmi", "health_index"]:
+        if col in df.columns:
+            feature_cols.append(col)
+    
+    X = df[feature_cols]
+    y = df["is_safe"]
+    
+    # Encode target
+    label_encoder = LabelEncoder()
+    y_encoded = label_encoder.fit_transform(y)
+    
+    # Split data
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y_encoded, test_size=0.2, stratify=y_encoded, random_state=42
+    )
+    
+    # Train advanced model
+    model = train_advanced_model(X_train, y_train)
+    
+    # Evaluate model
+    metrics = evaluate_model(model, X_test, y_test, label_encoder)
+    
+    # Get feature importances if available
+    feature_importances = None
+    if hasattr(model, "feature_importances_"):
+        feature_importances = dict(zip(X.columns, model.feature_importances_))
+    
+    # Save model
+    with open(MODEL_PATH, "wb") as f:
+        pickle.dump({
+            "model": model,
+            "label_encoder": label_encoder,
+            "features": {"numeric": X.select_dtypes(include=np.number).columns.tolist(),
+                         "categorical": X.select_dtypes(exclude=np.number).columns.tolist()}
+        }, f)
+    print(f"💾 Saved model to: [green]{MODEL_PATH}[/]")
+    
+    # Save metadata
+    save_metadata(label_encoder, 
+                 X.select_dtypes(include=np.number).columns.tolist(),
+                 X.select_dtypes(exclude=np.number).columns.tolist(),
+                 metrics,
+                 feature_importances)
+    
+    print("\n" + Panel.fit("[bold green]✅ Training Completed Successfully[/]", border_style="green"))
+
+# ============ EXECUTE ============
+if __name__ == "__main__":
+    train()

@@ -1,0 +1,302 @@
+"""
+NutriPlan AI - User Profile Classifier Training
+==============================================
+
+Trains a classifier to categorize users into dietary profiles:
+1. Hosteler (budget-conscious, limited cooking)
+2. Gym-Goer (high-protein, fitness-focused)
+3. Family (balanced, traditional meals)
+4. Professional (quick, healthy, office-friendly)
+"""
+
+import pandas as pd
+import numpy as np
+import joblib
+import json
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import train_test_split, GridSearchCV
+from sklearn.preprocessing import StandardScaler, OneHotEncoder
+from sklearn.compose import ColumnTransformer
+from sklearn.pipeline import Pipeline
+from sklearn.metrics import classification_report, confusion_matrix
+import matplotlib.pyplot as plt
+import seaborn as sns
+import geopandas as gpd
+from shapely.geometry import Point
+
+# Configure premium styling
+plt.style.use('seaborn-whitegrid')
+sns.set_palette("pastel")
+pd.set_option('display.max_columns', None)
+
+# Constants
+MODEL_PATH = "../models/profile_classifier.pkl"
+USER_DATA_PATH = "../data/indian_user_profiles.json"
+LOCATION_DB_PATH = "../data/indian_cities.geojson"
+
+class ProfileClassifierTrainer:
+    def __init__(self):
+        self.model = None
+        self.preprocessor = None
+        self.location_data = None
+        
+    def load_data(self):
+        """Load and prepare Indian user data"""
+        # Load user profiles
+        with open(USER_DATA_PATH) as f:
+            user_data = json.load(f)
+        self.df = pd.DataFrame(user_data)
+        
+        # Load geographic data
+        self.location_data = gpd.read_file(LOCATION_DB_PATH)
+        
+        print(f"📊 Loaded {len(self.df)} Indian user profiles")
+        
+    def engineer_features(self):
+        """Create culturally relevant features"""
+        # 1. Geographic features
+        self._add_geographic_features()
+        
+        # 2. Traditional food affinity
+        self.df['traditional_food_score'] = self.df.apply(
+            lambda x: self._calculate_traditional_score(x['favorite_foods'], x['region']), 
+            axis=1
+        )
+        
+        # 3. Budget efficiency
+        self.df['budget_efficiency'] = self.df['monthly_food_budget'] / (self.df['family_size'] + 1)
+        
+        # 4. Cooking constraint index
+        self.df['cooking_constraint'] = self.df.apply(
+            lambda x: 0 if x['cooking_facilities'] == 'full' else 1 if x['cooking_facilities'] == 'basic' else 2,
+            axis=1
+        )
+        
+        print("🧪 Engineered 4 new cultural features")
+        
+    def _add_geographic_features(self):
+        """Add location-based features"""
+        geometry = [Point(xy) for xy in zip(self.df['longitude'], self.df['latitude'])]
+        gdf = gpd.GeoDataFrame(self.df, geometry=geometry, crs="EPSG:4326")
+        
+        # Spatial join with city data
+        merged = gpd.sjoin(gdf, self.location_data, how='left', predicate='within')
+        
+        # Add features
+        self.df['city_type'] = merged['city_type']
+        self.df['region'] = merged['region']
+        self.df['local_cuisine'] = merged['dominant_cuisine']
+        
+    def _calculate_traditional_score(self, foods, region):
+        """Calculate affinity for traditional foods"""
+        regional_foods = {
+            'kerala': ['puttu', 'appam', 'fish curry', 'sadya'],
+            'north': ['roti', 'dal makhani', 'butter chicken'],
+            'south': ['dosa', 'idli', 'sambar', 'bisi bele bath'],
+            'west': ['vada pav', 'poha', 'dhokla'],
+            'east': ['macher jhol', 'rosogolla', 'pitha']
+        }
+        
+        region_foods = regional_foods.get(region.lower(), [])
+        return sum(1 for food in foods if food in region_foods) / max(1, len(region_foods))
+    
+    def train_model(self):
+        """Train and optimize classifier"""
+        # Define features and target
+        features = self.df[[
+            'age', 'gender', 'occupation', 'family_size', 'monthly_food_budget',
+            'cooking_constraint', 'fitness_goal', 'dietary_preference', 
+            'traditional_food_score', 'budget_efficiency', 'city_type', 'region'
+        ]]
+        target = self.df['profile_type']
+        
+        # Split data
+        X_train, X_test, y_train, y_test = train_test_split(
+            features, target, test_size=0.2, random_state=42, stratify=target
+        )
+        
+        # Build preprocessing pipeline
+        categorical_features = ['gender', 'occupation', 'fitness_goal', 
+                               'dietary_preference', 'city_type', 'region']
+        numeric_features = ['age', 'family_size', 'monthly_food_budget',
+                          'traditional_food_score', 'budget_efficiency',
+                          'cooking_constraint']
+        
+        preprocessor = ColumnTransformer([
+            ('num', StandardScaler(), numeric_features),
+            ('cat', OneHotEncoder(handle_unknown='ignore'), categorical_features)
+        ])
+        
+        # Build model pipeline
+        pipeline = Pipeline([
+            ('preprocessor', preprocessor),
+            ('classifier', RandomForestClassifier(random_state=42))
+        ])
+        
+        # Hyperparameter tuning
+        param_grid = {
+            'classifier__n_estimators': [100, 200],
+            'classifier__max_depth': [10, 20, None],
+            'classifier__min_samples_split': [2, 5]
+        }
+        
+        grid_search = GridSearchCV(
+            pipeline, param_grid, cv=5, scoring='f1_weighted', n_jobs=-1
+        )
+        grid_search.fit(X_train, y_train)
+        
+        self.model = grid_search.best_estimator_
+        self.preprocessor = preprocessor
+        
+        # Evaluate
+        y_pred = self.model.predict(X_test)
+        print(classification_report(y_test, y_pred))
+        self._plot_confusion_matrix(y_test, y_pred)
+        
+        print(f"✅ Best parameters: {grid_search.best_params_}")
+        
+    def _plot_confusion_matrix(self, y_true, y_pred):
+        """Create professional confusion matrix"""
+        cm = confusion_matrix(y_true, y_pred)
+        plt.figure(figsize=(10, 8))
+        sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', 
+                    xticklabels=self.model.classes_, 
+                    yticklabels=self.model.classes_)
+        plt.title('Profile Classification Performance', fontsize=16)
+        plt.xlabel('Predicted')
+        plt.ylabel('Actual')
+        plt.tight_layout()
+        plt.savefig('profile_classification_cm.png', dpi=300)
+        print("📊 Confusion matrix saved to profile_classification_cm.png")
+        
+    def save_model(self):
+        """Save the trained model with metadata"""
+        joblib.dump({
+            'model': self.model,
+            'preprocessor': self.preprocessor,
+            'classes': self.model.classes_,
+            'feature_names': self.df.columns.tolist()
+        }, MODEL_PATH)
+        
+        print(f"💾 Model saved to {MODEL_PATH}")
+        
+        # Save metadata
+        metadata = {
+            "training_date": pd.Timestamp.now().isoformat(),
+            "model_type": "RandomForestClassifier",
+            "num_samples": len(self.df),
+            "classes": list(self.model.classes_),
+            "features": numeric_features + categorical_features
+        }
+        with open("../models/profile_classifier_metadata.json", "w") as f:
+            json.dump(metadata, f, indent=2)
+
+class ProfileClassifier:
+    """Production profile classifier"""
+    def __init__(self):
+        try:
+            model_data = joblib.load(MODEL_PATH)
+            self.model = model_data['model']
+            self.preprocessor = model_data['preprocessor']
+            self.classes = model_data['classes']
+            print("👤 Profile classifier loaded successfully")
+        except Exception as e:
+            print(f"❌ Error loading model: {str(e)}")
+            self.model = None
+    
+    def predict_profile(self, user_data: dict) -> dict:
+        """Predict user profile with probabilities"""
+        if not self.model:
+            return {"error": "Model not loaded"}
+        
+        # Create input dataframe
+        input_df = pd.DataFrame([user_data])
+        
+        # Predict
+        probabilities = self.model.predict_proba(input_df)[0]
+        prediction = self.model.predict(input_df)[0]
+        
+        # Format results
+        return {
+            "profile": prediction,
+            "probabilities": dict(zip(self.classes, probabilities.round(4))),
+            "recommended_plan": self._get_recommendation(prediction, user_data)
+        }
+    
+    def _get_recommendation(self, profile, user_data):
+        """Get personalized recommendation based on profile"""
+        recommendations = {
+            "hosteler": {
+                "name": "Budget Hostel Plan",
+                "description": "Affordable meals with minimal cooking requirements",
+                "features": ["1-pot meals", "ready-to-eat options", "<₹100/day"]
+            },
+            "gym": {
+                "name": "Fitness Pro Plan",
+                "description": "High-protein meals for muscle growth and recovery",
+                "features": ["40%+ protein", "post-workout meals", "supplement guidance"]
+            },
+            "family": {
+                "name": "Family Balanced Plan",
+                "description": "Traditional balanced meals for the whole family",
+                "features": [f"{user_data['family_size']} servings", "regional specials", "kid-friendly"]
+            },
+            "professional": {
+                "name": "Office Executive Plan",
+                "description": "Quick, healthy meals for busy professionals",
+                "features": ["meal prep guides", "office lunch ideas", "30-min recipes"]
+            }
+        }
+        
+        # Kerala-specific adjustments
+        if user_data.get('region', '').lower() == 'kerala':
+            rec = recommendations[profile]
+            rec['features'].append("Kerala special meals")
+            if profile == "family":
+                rec['features'].append("Onam sadya planning")
+            return rec
+        
+        return recommendations.get(profile, {})
+
+# Sample Kerala User Data
+SAMPLE_KERALA_USER = {
+    "age": 22,
+    "gender": "male",
+    "occupation": "student",
+    "family_size": 1,
+    "monthly_food_budget": 4000,
+    "cooking_facilities": "basic",
+    "fitness_goal": "muscle_gain",
+    "dietary_preference": "non-vegetarian",
+    "favorite_foods": ["puttu", "fish curry", "beef fry"],
+    "latitude": 9.9312,
+    "longitude": 76.2673,
+    "region": "Kerala"
+}
+
+# Training Execution
+if __name__ == "__main__":
+    print("\n" + "="*60)
+    print("👤 NutriPlan AI - Indian Profile Classifier Training")
+    print("="*60)
+    
+    # Train and save model
+    trainer = ProfileClassifierTrainer()
+    trainer.load_data()
+    trainer.engineer_features()
+    trainer.train_model()
+    trainer.save_model()
+    
+    # Test classifier
+    print("\n🧪 Testing Classifier with Kerala User")
+    classifier = ProfileClassifier()
+    
+    result = classifier.predict_profile(SAMPLE_KERALA_USER)
+    print("\n🔍 Prediction Results:")
+    print(f"Profile: {result['profile']}")
+    print(f"Probabilities: {result['probabilities']}")
+    print(f"\n🌟 Recommended Plan: {result['recommended_plan']['name']}")
+    print(f"Description: {result['recommended_plan']['description']}")
+    print("Features:", ", ".join(result['recommended_plan']['features']))
+    
+    print("\n✅ Training and testing complete")

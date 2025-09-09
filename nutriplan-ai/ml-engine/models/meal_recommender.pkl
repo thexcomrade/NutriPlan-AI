@@ -1,0 +1,322 @@
+
+import pandas as pd
+import numpy as np
+import joblib
+import json
+import geopy.distance
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.pipeline import Pipeline
+from sklearn.compose import ColumnTransformer
+from sklearn.preprocessing import StandardScaler, OneHotEncoder, FunctionTransformer
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.decomposition import TruncatedSVD
+from sklearn.metrics import mean_squared_error
+from sklearn.model_selection import train_test_split
+from sklearn.base import BaseEstimator, TransformerMixin
+
+# Constants
+USER_DB_PATH = "../data/user_profiles.json"
+FOOD_DB_PATH = "../data/indian_foods.csv"
+GROCERY_DB_PATH = "../data/grocery_locations.json"
+MODEL_SAVE_PATH = "../models/meal_recommender.pkl"
+
+class GeoLocationEncoder(BaseEstimator, TransformerMixin):
+    """Encodes geographic proximity to food sources"""
+    def __init__(self, grocery_db):
+        self.grocery_db = grocery_db
+        self.nearest_market = None
+    
+    def fit(self, X, y=None):
+        return self
+    
+    def transform(self, X):
+        results = []
+        for _, row in X.iterrows():
+            user_coords = (row['latitude'], row['longitude'])
+            min_dist = float('inf')
+            
+            # Find nearest grocery location
+            for market in self.grocery_db:
+                market_coords = (market['latitude'], market['longitude'])
+                dist = geopy.distance.distance(user_coords, market_coords).km
+                if dist < min_dist:
+                    min_dist = dist
+                    self.nearest_market = market['name']
+            
+            # Encode features
+            results.append([
+                min_dist,
+                1 if 'supermarket' in self.nearest_market.lower() else 0,
+                1 if 'local market' in self.nearest_market.lower() else 0
+            ])
+        return np.array(results)
+
+class IngredientAnalyzer(BaseEstimator, TransformerMixin):
+    """Analyzes ingredient availability similarity"""
+    def __init__(self):
+        self.vectorizer = TfidfVectorizer()
+        self.svd = TruncatedSVD(n_components=5)
+    
+    def fit(self, X, y=None):
+        ingredients = X['available_ingredients'] + " " + X['cuisine_preferences']
+        self.vectorizer.fit(ingredients)
+        vectors = self.vectorizer.transform(ingredients)
+        self.svd.fit(vectors)
+        return self
+    
+    def transform(self, X):
+        combined_text = X['available_ingredients'] + " " + X['cuisine_preferences']
+        vectors = self.vectorizer.transform(combined_text)
+        return self.svd.transform(vectors)
+
+class KeralaMealRecommender:
+    def __init__(self):
+        self.model = None
+        self.preprocessor = None
+        self.grocery_db = None
+        self.feature_names = []
+    
+    def load_data(self):
+        """Load datasets"""
+        # Load user profiles with location and preferences
+        with open(USER_DB_PATH) as f:
+            user_data = json.load(f)
+        self.user_df = pd.DataFrame(user_data)
+        
+        # Load food database
+        self.food_df = pd.read_csv(FOOD_DB_PATH)
+        
+        # Load grocery locations
+        with open(GROCERY_DB_PATH) as f:
+            self.grocery_db = json.load(f)
+        
+        print(f"📊 Loaded {len(self.user_df)} users and {len(self.food_df)} meals")
+    
+    def prepare_dataset(self):
+        """Create training dataset with real-world features"""
+        # Merge user preferences with meal data
+        self.dataset = pd.merge(
+            self.user_df.explode('meal_ratings'),
+            self.food_df,
+            left_on='meal_ratings',
+            right_on='meal_id'
+        )
+        
+        # Create target variable (rating adjusted for user preferences)
+        self.dataset['target'] = self.dataset.apply(
+            lambda row: row['rating'] * (1.5 if row['diet_type'] == row['meal_type'] else 1),
+            axis=1
+        )
+        
+        print(f"🧪 Prepared dataset with {len(self.dataset)} samples")
+    
+    def build_pipeline(self):
+        """Create feature engineering pipeline"""
+        # Geo-location transformer
+        geo_encoder = GeoLocationEncoder(self.grocery_db)
+        
+        # Ingredient analyzer
+        ingredient_analyzer = IngredientAnalyzer()
+        
+        # Preprocessing pipeline
+        self.preprocessor = ColumnTransformer([
+            # User features
+            ('user_features', StandardScaler(), ['age', 'weight', 'budget']),
+            ('diet_encoder', OneHotEncoder(), ['diet_type']),
+            
+            # Geographic features
+            ('geo_features', FunctionTransformer(geo_encoder.transform), 
+             ['latitude', 'longitude']),
+            
+            # Ingredient analysis
+            ('ingredient_analysis', Pipeline([
+                ('analyzer', ingredient_analyzer)
+            ]), ['available_ingredients', 'cuisine_preferences']),
+            
+            # Meal features
+            ('meal_features', StandardScaler(), ['calories', 'protein', 'carbs', 'fat', 'cooking_time']),
+            ('meal_type', OneHotEncoder(), ['meal_type'])
+        ])
+        
+        # Full model pipeline
+        self.model = Pipeline([
+            ('preprocessor', self.preprocessor),
+            ('regressor', RandomForestRegressor(
+                n_estimators=300,
+                max_depth=12,
+                min_samples_split=5,
+                random_state=42,
+                n_jobs=-1
+            ))
+        ])
+    
+    def train(self):
+        """Train the model"""
+        X = self.dataset.drop(columns=['target', 'user_id', 'meal_id'])
+        y = self.dataset['target']
+        
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y, test_size=0.2, random_state=42
+        )
+        
+        self.model.fit(X_train, y_train)
+        
+        # Evaluate
+        train_score = self.model.score(X_train, y_train)
+        test_score = self.model.score(X_test, y_test)
+        print(f"✅ Training complete | Train R²: {train_score:.3f} | Test R²: {test_score:.3f}")
+    
+    def save_model(self):
+        """Save the complete pipeline"""
+        joblib.dump(self.model, MODEL_SAVE_PATH)
+        print(f"💾 Model saved to {MODEL_SAVE_PATH}")
+        
+        # Save additional metadata
+        model_meta = {
+            "training_date": pd.Timestamp.now().isoformat(),
+            "num_users": len(self.user_df),
+            "num_meals": len(self.food_df),
+            "grocery_db_version": "2024.1"
+        }
+        with open("../models/model_metadata.json", "w") as f:
+            json.dump(model_meta, f)
+
+class MealRecommender:
+    """Production meal recommendation engine"""
+    def __init__(self):
+        try:
+            self.model = joblib.load(MODEL_SAVE_PATH)
+            with open("../models/model_metadata.json") as f:
+                self.metadata = json.load(f)
+            print("🍛 Meal recommender loaded successfully")
+        except:
+            print("❌ Model loading failed")
+            self.model = None
+    
+    def recommend(self, user_data: dict, top_n: int = 5):
+        """Generate meal recommendations with shopping guidance"""
+        if not self.model:
+            return []
+        
+        # Create user dataframe
+        user_df = pd.DataFrame([user_data])
+        
+        # Get predictions for all meals
+        predictions = []
+        for _, meal in self.food_df.iterrows():
+            meal_data = user_df.copy()
+            for col, value in meal.items():
+                meal_data[col] = value
+            
+            # Predict rating
+            rating = self.model.predict(meal_data)[0]
+            predictions.append((meal['meal_id'], meal['name'], rating))
+        
+        # Sort and get top recommendations
+        predictions.sort(key=lambda x: x[2], reverse=True)
+        top_meals = predictions[:top_n]
+        
+        # Generate shopping lists
+        results = []
+        for meal_id, name, rating in top_meals:
+            meal_info = self.food_df[self.food_df['meal_id'] == meal_id].iloc[0]
+            missing_ingredients = self._get_missing_ingredients(
+                user_data['available_ingredients'], 
+                meal_info['ingredients']
+            )
+            
+            # Find nearest stores with ingredients
+            stores = self._find_ingredient_sources(
+                user_data, 
+                missing_ingredients
+            )
+            
+            results.append({
+                "meal_id": meal_id,
+                "name": name,
+                "rating": round(rating, 2),
+                "nutrition": {
+                    "calories": meal_info['calories'],
+                    "protein": meal_info['protein'],
+                    "carbs": meal_info['carbs'],
+                    "fat": meal_info['fat']
+                },
+                "missing_ingredients": missing_ingredients,
+                "stores": stores,
+                "estimated_cost": round(meal_info['cost'] * len(missing_ingredients) * 1.2, 2)
+            })
+        
+        return results
+    
+    def _get_missing_ingredients(self, available: str, required: str):
+        """Identify ingredients needed for meal"""
+        avail_set = set(ing.strip().lower() for ing in available.split(','))
+        req_set = set(ing.strip().lower() for ing in required.split(','))
+        return list(req_set - avail_set)
+    
+    def _find_ingredient_sources(self, user_data: dict, ingredients: list):
+        """Find stores carrying missing ingredients"""
+        stores = []
+        for market in self.grocery_db:
+            # Calculate distance
+            market_coords = (market['latitude'], market['longitude'])
+            user_coords = (user_data['latitude'], user_data['longitude'])
+            distance = geopy.distance.distance(user_coords, market_coords).km
+            
+            # Check ingredient availability
+            market_ings = set(ing.lower() for ing in market['ingredients'])
+            available_ings = [ing for ing in ingredients if ing in market_ings]
+            
+            if available_ings:
+                stores.append({
+                    "name": market['name'],
+                    "distance": round(distance, 2),
+                    "available_ingredients": available_ings,
+                    "address": market['address']
+                })
+        
+        return sorted(stores, key=lambda x: x['distance'])[:3]
+
+# Sample Kerala User Data
+SAMPLE_USER = {
+    "user_id": "ker123",
+    "age": 34,
+    "weight": 68.5,
+    "latitude": 9.9312,
+    "longitude": 76.2673,
+    "diet_type": "non-vegetarian",
+    "budget": 250,  # Daily meal budget in INR
+    "available_ingredients": "rice, coconut, fish, spices, onion, tomato",
+    "cuisine_preferences": "kerala, south indian"
+}
+
+# Training Execution
+if __name__ == "__main__":
+    print("\n" + "="*60)
+    print("🍛 NutriPlan AI - Kerala Meal Recommender Training")
+    print("="*60)
+    
+    # Train and save model
+    trainer = KeralaMealRecommender()
+    trainer.load_data()
+    trainer.prepare_dataset()
+    trainer.build_pipeline()
+    trainer.train()
+    trainer.save_model()
+    
+    # Test recommendation
+    print("\n🧪 Testing Recommendation System")
+    recommender = MealRecommender()
+    
+    recommendations = recommender.recommend(SAMPLE_USER)
+    print("\n🍽️ Recommended Meals for Kochi User:")
+    for meal in recommendations:
+        print(f"\n- {meal['name']} (Rating: {meal['rating']}/5)")
+        print(f"  Missing ingredients: {', '.join(meal['missing_ingredients'])}")
+        print(f"  Estimated cost: ₹{meal['estimated_cost']}")
+        if meal['stores']:
+            print("  Available at:")
+            for store in meal['stores']:
+                print(f"    • {store['name']} ({store['distance']}km) - {', '.join(store['available_ingredients'])}")
+    
+    print("\n✅ Training and testing complete")
